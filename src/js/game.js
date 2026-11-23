@@ -212,11 +212,13 @@ function decideGhost( game, g ) {
   const grid = game.grid;
   const width = grid[ 0 ].length;
   const leaving = g.mode === 'leaving';
-  const target = leaving ? PEN_EXIT : ghostTarget( game, g );
+  const eaten = g.mode === 'eaten';
+  const canUseDoor = leaving || eaten;
+  const target = leaving ? PEN_EXIT : eaten ? g.home : ghostTarget( game, g );
 
   const options = Object.keys( DIRS ).filter(
-    ( dir ) => ( leaving || dir !== OPPOSITE[ g.dir ] ) &&
-      canMove( grid, g.x, g.y, dir, 'ghost', leaving )
+    ( dir ) => ( canUseDoor || dir !== OPPOSITE[ g.dir ] ) &&
+      canMove( grid, g.x, g.y, dir, 'ghost', canUseDoor )
   );
   // Sin salida (callejon): permitir el giro de 180.
   const choices = options.length ? options : [ '' + OPPOSITE[ g.dir ] ];
@@ -243,8 +245,8 @@ function decideGhost( game, g ) {
     return;
   }
 
-  if ( leaving || g.kind === 'chaser' ) {
-    const step = shortestStep( game, g, target, leaving );
+  if ( canUseDoor || g.kind === 'chaser' ) {
+    const step = shortestStep( game, g, target, canUseDoor );
     if ( step && choices.includes( step ) ) {
       g.dir = step;
       return;
@@ -276,6 +278,13 @@ function moveGhost( game, g ) {
   if ( aligned( g.x ) && aligned( g.y ) ) {
     g.x = Math.round( g.x );
     g.y = Math.round( g.y );
+    if ( g.mode === 'eaten' && g.x === g.home.x && g.y === g.home.y ) {
+      g.mode = 'pen';
+      g.dir = 'up';
+      g.speed = GHOST_SPEED;
+      g.releaseFrame = game.elapsedFrames + g.releaseDelay;
+      return;
+    }
     if ( g.mode === 'leaving' && g.x === PEN_EXIT.x && g.y === PEN_EXIT.y ) {
       g.mode = 'active';
       g.dir = 'left';
@@ -286,7 +295,8 @@ function moveGhost( game, g ) {
     } else {
       decideGhost( game, g );
     }
-    if ( !canMove( grid, g.x, g.y, g.dir, 'ghost', g.mode === 'leaving' ) ) return;
+    const canUseDoor = g.mode === 'leaving' || g.mode === 'eaten';
+    if ( !canMove( grid, g.x, g.y, g.dir, 'ghost', canUseDoor ) ) return;
   }
 
   const d = DIRS[ g.dir ];
@@ -302,11 +312,15 @@ function resetPositions( game ) {
   p.dir = 'left';
   p.nextDir = null;
   game.elapsedFrames = 0;
+  game.frightenedFrames = 0;
+  game.ghostCombo = 0;
   game.ghosts.forEach( ( g, i ) => {
     g.x = GHOST_STARTS[ i ].x;
     g.y = GHOST_STARTS[ i ].y;
     g.dir = 'up';
+    g.speed = GHOST_SPEED;
     g.mode = 'pen';
+    g.releaseFrame = GHOST_STARTS[ i ].releaseFrame;
   } );
 }
 
@@ -334,15 +348,22 @@ function update( game ) {
   } );
 
   for ( const g of game.ghosts ) {
-    if ( collides( game.pacman, g ) ) {
-      game.lives--;
-      if ( game.lives <= 0 ) {
-        game.state = 'lost';
-        return;
-      }
-      resetPositions( game );
-      break;
+    if ( !collides( game.pacman, g ) ) continue;
+    if ( g.mode === 'frightened' ) {
+      game.score += GHOST_POINTS[ Math.min( game.ghostCombo, 3 ) ];
+      game.ghostCombo++;
+      g.mode = 'eaten';
+      g.speed = EATEN_SPEED;
+      continue;
     }
+    if ( g.mode === 'eaten' ) continue;
+    game.lives--;
+    if ( game.lives <= 0 ) {
+      game.state = 'lost';
+      return;
+    }
+    resetPositions( game );
+    break;
   }
 
   if ( game.dotsRemaining <= 0 ) game.state = 'won';
