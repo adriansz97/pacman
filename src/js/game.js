@@ -71,8 +71,7 @@ function activateFrightened( game ) {
   for ( const g of game.ghosts ) {
     if ( g.mode !== 'active' ) continue;
     g.dir = OPPOSITE[ g.dir ];
-    g.mode = 'frightened';
-    g.speed = FRIGHTENED_SPEED;
+    setGhostSpeed( game, g, 'frightened', FRIGHTENED_SPEED, false );
   }
 }
 
@@ -80,17 +79,24 @@ function aligned( v ) {
   return Math.abs( v - Math.round( v ) ) < 1e-3;
 }
 
-// Al comer, la velocidad cambia a 0.2 y una posicion fraccionaria podria no
-// alinearse nunca: se ajusta a un centro de celda para que canMove() vuelva
-// a frenar en las paredes.
-function snapGhostToCell( game, g ) {
+// Un cambio de velocidad a mitad de celda puede dejar un offset que no vuelve
+// a alinearse nunca (0.05 -> 0.1, por ejemplo). Sin alineacion, moveGhost()
+// no vuelve a comprobar paredes y el fantasma las atraviesa. Todo cambio de
+// velocidad debe realinear al fantasma con el centro de una celda.
+function setGhostSpeed( game, g, mode, speed, ghostCanUseDoor ) {
+  g.mode = mode;
+  g.speed = speed;
+  snapGhostToCell( game, g, ghostCanUseDoor );
+}
+
+function snapGhostToCell( game, g, ghostCanUseDoor ) {
   if ( aligned( g.x ) && aligned( g.y ) ) return;
   const d = DIRS[ g.dir ];
   const cell = {
     x: d.x > 0 ? Math.floor( g.x ) : d.x < 0 ? Math.ceil( g.x ) : Math.round( g.x ),
     y: d.y > 0 ? Math.floor( g.y ) : d.y < 0 ? Math.ceil( g.y ) : Math.round( g.y ),
   };
-  if ( canMove( game.grid, cell.x, cell.y, g.dir, 'ghost', true ) ) {
+  if ( canMove( game.grid, cell.x, cell.y, g.dir, 'ghost', ghostCanUseDoor ) ) {
     g.x = cell.x + d.x;
     g.y = cell.y + d.y;
   } else {
@@ -299,9 +305,8 @@ function moveGhost( game, g ) {
     g.x = Math.round( g.x );
     g.y = Math.round( g.y );
     if ( g.mode === 'eaten' && g.x === g.home.x && g.y === g.home.y ) {
-      g.mode = 'pen';
+      setGhostSpeed( game, g, 'pen', GHOST_SPEED, false );
       g.dir = 'up';
-      g.speed = GHOST_SPEED;
       g.releaseFrame = game.elapsedFrames + g.releaseDelay;
       return;
     }
@@ -355,8 +360,7 @@ function update( game ) {
     if ( game.frightenedFrames === 0 ) {
       game.ghosts.forEach( ( g ) => {
         if ( g.mode !== 'frightened' ) return;
-        g.mode = 'active';
-        g.speed = GHOST_SPEED;
+        setGhostSpeed( game, g, 'active', GHOST_SPEED, false );
       } );
       game.ghostCombo = 0;
     }
@@ -372,9 +376,7 @@ function update( game ) {
     if ( g.mode === 'frightened' ) {
       game.score += GHOST_POINTS[ Math.min( game.ghostCombo, 3 ) ];
       game.ghostCombo++;
-      g.mode = 'eaten';
-      g.speed = EATEN_SPEED;
-      snapGhostToCell( game, g );
+      setGhostSpeed( game, g, 'eaten', EATEN_SPEED, true );
       continue;
     }
     if ( g.mode === 'eaten' ) continue;
