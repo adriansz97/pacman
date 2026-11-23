@@ -76,7 +76,7 @@ Convenciones: coordenadas `(x, y)` con origen arriba-izquierda; `dotsRemaining` 
 3. En `src/js/game.js`, declarar las constantes y los campos `frightenedFrames`, `ghostCombo`, `home` y `releaseDelay`. Al comer una pellet: sumar 50, fijar `frightenedFrames = 360`, `ghostCombo = 0`, invertir `dir` de los `active` y pasarlos a `frightened` con `speed = 0.05`. Si el modo ya estaba activo, solo se reinician temporizador y cadena, sin segunda inversión. Manual: los fantasmas activos giran 180°.
 4. En `update()`, decrementar `frightenedFrames` al inicio de cada frame; al llegar a 0, devolver los `frightened` a `active` con `speed = GHOST_SPEED` y poner `ghostCombo = 0`. En `decideGhost()`, añadir la rama `frightened`: elegir el vecino transitable que maximice la distancia Manhattan a la celda de Pac-Man, sin inversión salvo callejón. Manual: huida de ~6 s y reanudación de la IA de SPEC 01.
 5. En `update()`, tratar la colisión: `frightened` → sumar `GHOST_POINTS[min(ghostCombo,3)]`, incrementar `ghostCombo` y pasar a `eaten` con `speed = EATEN_SPEED`; `eaten` → sin efecto; los demás → quitar vida como hoy. En `moveGhost()`, usar `shortestStep(game, g, g.home, true)` para `eaten` y, al llegar, fijar `mode = 'pen'`, `dir = 'up'`, `speed = GHOST_SPEED` y `releaseFrame = game.elapsedFrames + g.releaseDelay`. Extender `resetPositions()` con `frightenedFrames = 0` y `ghostCombo = 0`. Manual: puntos encadenados, ojos volviendo a la pen y salida escalonada.
-6. En `src/js/render.js`, dibujar `frightened` en azul con ojos blancos, alternar azul/blanco cada ~10 frames cuando `game.elapsedFrames >= FRIGHTENED_FRAMES - BLINK_FRAMES`, y dibujar `eaten` solo como ojos. Manual: verificación visual completa en navegador.
+6. En `src/js/render.js`, dibujar `frightened` en azul con ojos blancos, alternar azul/blanco cada ~10 frames cuando `game.frightenedFrames <= BLINK_FRAMES`, y dibujar `eaten` solo como ojos. Manual: verificación visual completa en navegador.
 
 ## Acceptance criteria
 
@@ -112,7 +112,7 @@ Convenciones: coordenadas `(x, y)` con origen arriba-izquierda; `dotsRemaining` 
 | --- | --- |
 | Una pellet se come mientras hay fantasmas `eaten` | El estado `eaten` no se transforma: sigue su BFS a la pen y conserva su velocidad. |
 | El BFS de regreso atraviesa la puerta y la pen | `shortestStep()` ya acepta `ghostCanUseDoor`; se pasa `true` solo para `eaten`. |
-| El parpadeo depende del frame de dibujo y no del de juego | Usar `game.elapsedFrames`, que ya se reinicia con la partida. |
+| El parpadeo depende del frame de dibujo y no del de juego | Usar `game.frightenedFrames`, que se reinicia en cada activación y al perder vida. |
 | Fantasma asustado acorralado en un callejón | Se mantiene la regla existente de permitir inversión de 180° sin salida. |
 
 ## What is **not** in this spec
