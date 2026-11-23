@@ -19,6 +19,12 @@ const COWARD_RANGE = 8;
 const COWARD_CORNER = { x: 26, y: 1 };
 const PEN_EXIT = { x: 13, y: 11 }; // celda transitable justo sobre la puerta
 
+const FRIGHTENED_FRAMES = 360;
+const BLINK_FRAMES = 120;
+const FRIGHTENED_SPEED = 0.05;
+const EATEN_SPEED = 0.2;
+const GHOST_POINTS = [ 200, 400, 800, 1600 ];
+
 // Crea una partida nueva. Copia MAZE (pristino) a game.grid para poder comer
 // dots sin destruir el original, y reiniciar.
 function createGame() {
@@ -27,7 +33,7 @@ function createGame() {
   grid[ PACMAN_START.y ][ PACMAN_START.x ] = 0;
 
   let dots = 0;
-  for ( const row of grid ) for ( const v of row ) if ( v === 2 ) dots++;
+  for ( const row of grid ) for ( const v of row ) if ( v === 2 || v === 4 ) dots++;
 
   return {
     state: 'start',
@@ -35,6 +41,8 @@ function createGame() {
     lives: 3,
     dotsRemaining: dots,
     elapsedFrames: 0,
+    frightenedFrames: 0,
+    ghostCombo: 0,
     grid,
     pacman: {
       x: PACMAN_START.x,
@@ -50,13 +58,52 @@ function createGame() {
       speed: GHOST_SPEED,
       kind: g.kind,
       releaseFrame: g.releaseFrame,
-      mode: 'pen', // 'pen' -> 'leaving' -> 'active'
+      mode: 'pen', // 'pen' -> 'leaving' -> 'active' -> 'frightened' -> 'eaten'
+      home: { x: g.x, y: g.y },
+      releaseDelay: g.releaseFrame,
     } ) ),
   };
 }
 
+function activateFrightened( game ) {
+  game.frightenedFrames = FRIGHTENED_FRAMES;
+  game.ghostCombo = 0;
+  for ( const g of game.ghosts ) {
+    if ( g.mode !== 'active' ) continue;
+    g.dir = OPPOSITE[ g.dir ];
+    setGhostSpeed( game, g, 'frightened', FRIGHTENED_SPEED, false );
+  }
+}
+
 function aligned( v ) {
   return Math.abs( v - Math.round( v ) ) < 1e-3;
+}
+
+// Un cambio de velocidad a mitad de celda puede dejar un offset que no vuelve
+// a alinearse nunca (0.05 -> 0.1, por ejemplo). Sin alineacion, moveGhost()
+// no vuelve a comprobar paredes y el fantasma las atraviesa. Todo cambio de
+// velocidad debe realinear al fantasma con el centro de una celda.
+function setGhostSpeed( game, g, mode, speed, ghostCanUseDoor ) {
+  g.mode = mode;
+  g.speed = speed;
+  snapGhostToCell( game, g, ghostCanUseDoor );
+}
+
+function snapGhostToCell( game, g, ghostCanUseDoor ) {
+  if ( aligned( g.x ) && aligned( g.y ) ) return;
+  const d = DIRS[ g.dir ];
+  const cell = {
+    x: d.x > 0 ? Math.floor( g.x ) : d.x < 0 ? Math.ceil( g.x ) : Math.round( g.x ),
+    y: d.y > 0 ? Math.floor( g.y ) : d.y < 0 ? Math.ceil( g.y ) : Math.round( g.y ),
+  };
+  if ( canMove( game.grid, cell.x, cell.y, g.dir, 'ghost', ghostCanUseDoor ) ) {
+    g.x = cell.x + d.x;
+    g.y = cell.y + d.y;
+  } else {
+    g.x = cell.x;
+    g.y = cell.y;
+  }
+  wrapTunnel( g, game.grid[ 0 ].length );
 }
 
 // Una celda es muro para el actor dado?
@@ -103,11 +150,13 @@ function movePacman( game ) {
       p.dir = p.nextDir;
       p.nextDir = null;
     }
-    // Comer dot.
-    if ( grid[ p.y ][ p.x ] === 2 ) {
+    // Comer dot o power pellet.
+    const tile = grid[ p.y ][ p.x ];
+    if ( tile === 2 || tile === 4 ) {
       grid[ p.y ][ p.x ] = 0;
-      game.score += 10;
+      game.score += tile === 4 ? 50 : 10;
       game.dotsRemaining--;
+      if ( tile === 4 ) activateFrightened( game );
     }
     // Si no puede seguir, se detiene en la celda.
     if ( !canMove( grid, p.x, p.y, p.dir, 'pacman' ) ) return;
@@ -189,17 +238,41 @@ function decideGhost( game, g ) {
   const grid = game.grid;
   const width = grid[ 0 ].length;
   const leaving = g.mode === 'leaving';
-  const target = leaving ? PEN_EXIT : ghostTarget( game, g );
+  const eaten = g.mode === 'eaten';
+  const canUseDoor = leaving || eaten;
+  const target = leaving ? PEN_EXIT : eaten ? g.home : ghostTarget( game, g );
 
   const options = Object.keys( DIRS ).filter(
-    ( dir ) => ( leaving || dir !== OPPOSITE[ g.dir ] ) &&
-      canMove( grid, g.x, g.y, dir, 'ghost', leaving )
+    ( dir ) => ( canUseDoor || dir !== OPPOSITE[ g.dir ] ) &&
+      canMove( grid, g.x, g.y, dir, 'ghost', canUseDoor )
   );
   // Sin salida (callejon): permitir el giro de 180.
   const choices = options.length ? options : [ '' + OPPOSITE[ g.dir ] ];
 
-  if ( leaving || g.kind === 'chaser' ) {
-    const step = shortestStep( game, g, target, leaving );
+  if ( g.mode === 'frightened' ) {
+    const pac = pacmanCell( game.pacman );
+    const distance = ( dir ) => {
+      const d = DIRS[ dir ];
+      const nx = g.x + d.x;
+      const ny = g.y + d.y;
+      const cellX = ny === TUNNEL_ROW ? tunnelX( nx, width ) : nx;
+      return Math.abs( cellX - pac.x ) + Math.abs( ny - pac.y );
+    };
+    let best = choices.includes( g.dir ) ? g.dir : choices[ 0 ];
+    let bestDist = distance( best );
+    for ( const dir of choices ) {
+      const dist = distance( dir );
+      if ( dist > bestDist ) {
+        bestDist = dist;
+        best = dir;
+      }
+    }
+    g.dir = best;
+    return;
+  }
+
+  if ( canUseDoor || g.kind === 'chaser' ) {
+    const step = shortestStep( game, g, target, canUseDoor );
     if ( step && choices.includes( step ) ) {
       g.dir = step;
       return;
@@ -231,6 +304,12 @@ function moveGhost( game, g ) {
   if ( aligned( g.x ) && aligned( g.y ) ) {
     g.x = Math.round( g.x );
     g.y = Math.round( g.y );
+    if ( g.mode === 'eaten' && g.x === g.home.x && g.y === g.home.y ) {
+      setGhostSpeed( game, g, 'pen', GHOST_SPEED, false );
+      g.dir = 'up';
+      g.releaseFrame = game.elapsedFrames + g.releaseDelay;
+      return;
+    }
     if ( g.mode === 'leaving' && g.x === PEN_EXIT.x && g.y === PEN_EXIT.y ) {
       g.mode = 'active';
       g.dir = 'left';
@@ -241,7 +320,8 @@ function moveGhost( game, g ) {
     } else {
       decideGhost( game, g );
     }
-    if ( !canMove( grid, g.x, g.y, g.dir, 'ghost', g.mode === 'leaving' ) ) return;
+    const canUseDoor = g.mode === 'leaving' || g.mode === 'eaten';
+    if ( !canMove( grid, g.x, g.y, g.dir, 'ghost', canUseDoor ) ) return;
   }
 
   const d = DIRS[ g.dir ];
@@ -257,11 +337,15 @@ function resetPositions( game ) {
   p.dir = 'left';
   p.nextDir = null;
   game.elapsedFrames = 0;
+  game.frightenedFrames = 0;
+  game.ghostCombo = 0;
   game.ghosts.forEach( ( g, i ) => {
     g.x = GHOST_STARTS[ i ].x;
     g.y = GHOST_STARTS[ i ].y;
     g.dir = 'up';
+    g.speed = GHOST_SPEED;
     g.mode = 'pen';
+    g.releaseFrame = GHOST_STARTS[ i ].releaseFrame;
   } );
 }
 
@@ -271,6 +355,16 @@ function collides( a, b ) {
 
 function update( game ) {
   game.elapsedFrames++;
+  if ( game.frightenedFrames > 0 ) {
+    game.frightenedFrames--;
+    if ( game.frightenedFrames === 0 ) {
+      game.ghosts.forEach( ( g ) => {
+        if ( g.mode !== 'frightened' ) return;
+        setGhostSpeed( game, g, 'active', GHOST_SPEED, false );
+      } );
+      game.ghostCombo = 0;
+    }
+  }
   movePacman( game );
   game.ghosts.forEach( ( g ) => {
     if ( g.mode === 'pen' && game.elapsedFrames >= g.releaseFrame ) g.mode = 'leaving';
@@ -278,15 +372,21 @@ function update( game ) {
   } );
 
   for ( const g of game.ghosts ) {
-    if ( collides( game.pacman, g ) ) {
-      game.lives--;
-      if ( game.lives <= 0 ) {
-        game.state = 'lost';
-        return;
-      }
-      resetPositions( game );
-      break;
+    if ( !collides( game.pacman, g ) ) continue;
+    if ( g.mode === 'frightened' ) {
+      game.score += GHOST_POINTS[ Math.min( game.ghostCombo, 3 ) ];
+      game.ghostCombo++;
+      setGhostSpeed( game, g, 'eaten', EATEN_SPEED, true );
+      continue;
     }
+    if ( g.mode === 'eaten' ) continue;
+    game.lives--;
+    if ( game.lives <= 0 ) {
+      game.state = 'lost';
+      return;
+    }
+    resetPositions( game );
+    break;
   }
 
   if ( game.dotsRemaining <= 0 ) game.state = 'won';
