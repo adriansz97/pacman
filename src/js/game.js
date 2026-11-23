@@ -221,6 +221,28 @@ function decideGhost( game, g ) {
   // Sin salida (callejon): permitir el giro de 180.
   const choices = options.length ? options : [ '' + OPPOSITE[ g.dir ] ];
 
+  if ( g.mode === 'frightened' ) {
+    const pac = pacmanCell( game.pacman );
+    const distance = ( dir ) => {
+      const d = DIRS[ dir ];
+      const nx = g.x + d.x;
+      const ny = g.y + d.y;
+      const cellX = ny === TUNNEL_ROW ? tunnelX( nx, width ) : nx;
+      return Math.abs( cellX - pac.x ) + Math.abs( ny - pac.y );
+    };
+    let best = choices.includes( g.dir ) ? g.dir : choices[ 0 ];
+    let bestDist = distance( best );
+    for ( const dir of choices ) {
+      const dist = distance( dir );
+      if ( dist > bestDist ) {
+        bestDist = dist;
+        best = dir;
+      }
+    }
+    g.dir = best;
+    return;
+  }
+
   if ( leaving || g.kind === 'chaser' ) {
     const step = shortestStep( game, g, target, leaving );
     if ( step && choices.includes( step ) ) {
@@ -294,6 +316,17 @@ function collides( a, b ) {
 
 function update( game ) {
   game.elapsedFrames++;
+  if ( game.frightenedFrames > 0 ) {
+    game.frightenedFrames--;
+    if ( game.frightenedFrames === 0 ) {
+      game.ghosts.forEach( ( g ) => {
+        if ( g.mode !== 'frightened' ) return;
+        g.mode = 'active';
+        g.speed = GHOST_SPEED;
+      } );
+      game.ghostCombo = 0;
+    }
+  }
   movePacman( game );
   game.ghosts.forEach( ( g ) => {
     if ( g.mode === 'pen' && game.elapsedFrames >= g.releaseFrame ) g.mode = 'leaving';
