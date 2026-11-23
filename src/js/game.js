@@ -19,6 +19,12 @@ const COWARD_RANGE = 8;
 const COWARD_CORNER = { x: 26, y: 1 };
 const PEN_EXIT = { x: 13, y: 11 }; // celda transitable justo sobre la puerta
 
+const FRIGHTENED_FRAMES = 360;
+const BLINK_FRAMES = 120;
+const FRIGHTENED_SPEED = 0.05;
+const EATEN_SPEED = 0.2;
+const GHOST_POINTS = [ 200, 400, 800, 1600 ];
+
 // Crea una partida nueva. Copia MAZE (pristino) a game.grid para poder comer
 // dots sin destruir el original, y reiniciar.
 function createGame() {
@@ -35,6 +41,8 @@ function createGame() {
     lives: 3,
     dotsRemaining: dots,
     elapsedFrames: 0,
+    frightenedFrames: 0,
+    ghostCombo: 0,
     grid,
     pacman: {
       x: PACMAN_START.x,
@@ -50,9 +58,22 @@ function createGame() {
       speed: GHOST_SPEED,
       kind: g.kind,
       releaseFrame: g.releaseFrame,
-      mode: 'pen', // 'pen' -> 'leaving' -> 'active'
+      mode: 'pen', // 'pen' -> 'leaving' -> 'active' -> 'frightened' -> 'eaten'
+      home: { x: g.x, y: g.y },
+      releaseDelay: g.releaseFrame,
     } ) ),
   };
+}
+
+function activateFrightened( game ) {
+  game.frightenedFrames = FRIGHTENED_FRAMES;
+  game.ghostCombo = 0;
+  for ( const g of game.ghosts ) {
+    if ( g.mode !== 'active' ) continue;
+    g.dir = OPPOSITE[ g.dir ];
+    g.mode = 'frightened';
+    g.speed = FRIGHTENED_SPEED;
+  }
 }
 
 function aligned( v ) {
@@ -109,6 +130,7 @@ function movePacman( game ) {
       grid[ p.y ][ p.x ] = 0;
       game.score += tile === 4 ? 50 : 10;
       game.dotsRemaining--;
+      if ( tile === 4 ) activateFrightened( game );
     }
     // Si no puede seguir, se detiene en la celda.
     if ( !canMove( grid, p.x, p.y, p.dir, 'pacman' ) ) return;
