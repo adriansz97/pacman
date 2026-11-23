@@ -17,6 +17,7 @@ const AMBUSH_TILES = 4;
 const FLANK_TILES = 2;
 const COWARD_RANGE = 8;
 const COWARD_CORNER = { x: 26, y: 1 };
+const PEN_EXIT = { x: 13, y: 11 }; // celda transitable justo sobre la puerta
 
 // Crea una partida nueva. Copia MAZE (pristino) a game.grid para poder comer
 // dots sin destruir el original, y reiniciar.
@@ -49,7 +50,7 @@ function createGame() {
       speed: GHOST_SPEED,
       kind: g.kind,
       releaseFrame: g.releaseFrame,
-      released: false,
+      mode: 'pen', // 'pen' -> 'leaving' -> 'active'
     } ) ),
   };
 }
@@ -60,7 +61,7 @@ function aligned( v ) {
 
 // Una celda es muro para el actor dado?
 //   pacman: bloqueado por pared (1) y puerta (3)
-//   ghost:  bloqueado por pared (1) y, si no esta liberado, por la puerta (3)
+//   ghost:  bloqueado por pared (1) y, si no esta saliendo, por la puerta (3)
 function isWall( grid, x, y, actor, ghostCanUseDoor ) {
   if ( y < 0 || y >= grid.length ) return true;
   if ( x < 0 || x >= grid[ 0 ].length ) return true;
@@ -187,17 +188,18 @@ function shortestStep( game, g, target, ghostCanUseDoor ) {
 function decideGhost( game, g ) {
   const grid = game.grid;
   const width = grid[ 0 ].length;
-  const target = ghostTarget( game, g );
+  const leaving = g.mode === 'leaving';
+  const target = leaving ? PEN_EXIT : ghostTarget( game, g );
 
   const options = Object.keys( DIRS ).filter(
-    ( dir ) => dir !== OPPOSITE[ g.dir ] &&
-      canMove( grid, g.x, g.y, dir, 'ghost', g.released )
+    ( dir ) => ( leaving || dir !== OPPOSITE[ g.dir ] ) &&
+      canMove( grid, g.x, g.y, dir, 'ghost', leaving )
   );
   // Sin salida (callejon): permitir el giro de 180.
   const choices = options.length ? options : [ '' + OPPOSITE[ g.dir ] ];
 
-  if ( g.kind === 'chaser' ) {
-    const step = shortestStep( game, g, target, g.released );
+  if ( leaving || g.kind === 'chaser' ) {
+    const step = shortestStep( game, g, target, leaving );
     if ( step && choices.includes( step ) ) {
       g.dir = step;
       return;
@@ -229,8 +231,17 @@ function moveGhost( game, g ) {
   if ( aligned( g.x ) && aligned( g.y ) ) {
     g.x = Math.round( g.x );
     g.y = Math.round( g.y );
-    decideGhost( game, g );
-    if ( !canMove( grid, g.x, g.y, g.dir, 'ghost', g.released ) ) return;
+    if ( g.mode === 'leaving' && g.x === PEN_EXIT.x && g.y === PEN_EXIT.y ) {
+      g.mode = 'active';
+      g.dir = 'left';
+    }
+    if ( g.mode === 'pen' ) {
+      // Rebote vertical en la pen: invertir al chocar, sin decidir ruta.
+      if ( !canMove( grid, g.x, g.y, g.dir, 'ghost', false ) ) g.dir = OPPOSITE[ g.dir ];
+    } else {
+      decideGhost( game, g );
+    }
+    if ( !canMove( grid, g.x, g.y, g.dir, 'ghost', g.mode === 'leaving' ) ) return;
   }
 
   const d = DIRS[ g.dir ];
@@ -250,7 +261,7 @@ function resetPositions( game ) {
     g.x = GHOST_STARTS[ i ].x;
     g.y = GHOST_STARTS[ i ].y;
     g.dir = 'up';
-    g.released = false;
+    g.mode = 'pen';
   } );
 }
 
@@ -262,7 +273,7 @@ function update( game ) {
   game.elapsedFrames++;
   movePacman( game );
   game.ghosts.forEach( ( g ) => {
-    if ( game.elapsedFrames >= g.releaseFrame ) g.released = true;
+    if ( g.mode === 'pen' && game.elapsedFrames >= g.releaseFrame ) g.mode = 'leaving';
     moveGhost( game, g );
   } );
 
