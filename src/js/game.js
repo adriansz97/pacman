@@ -80,6 +80,26 @@ function aligned( v ) {
   return Math.abs( v - Math.round( v ) ) < 1e-3;
 }
 
+// Al comer, la velocidad cambia a 0.2 y una posicion fraccionaria podria no
+// alinearse nunca: se ajusta a un centro de celda para que canMove() vuelva
+// a frenar en las paredes.
+function snapGhostToCell( game, g ) {
+  if ( aligned( g.x ) && aligned( g.y ) ) return;
+  const d = DIRS[ g.dir ];
+  const cell = {
+    x: d.x > 0 ? Math.floor( g.x ) : d.x < 0 ? Math.ceil( g.x ) : Math.round( g.x ),
+    y: d.y > 0 ? Math.floor( g.y ) : d.y < 0 ? Math.ceil( g.y ) : Math.round( g.y ),
+  };
+  if ( canMove( game.grid, cell.x, cell.y, g.dir, 'ghost', true ) ) {
+    g.x = cell.x + d.x;
+    g.y = cell.y + d.y;
+  } else {
+    g.x = cell.x;
+    g.y = cell.y;
+  }
+  wrapTunnel( g, game.grid[ 0 ].length );
+}
+
 // Una celda es muro para el actor dado?
 //   pacman: bloqueado por pared (1) y puerta (3)
 //   ghost:  bloqueado por pared (1) y, si no esta saliendo, por la puerta (3)
@@ -354,6 +374,7 @@ function update( game ) {
       game.ghostCombo++;
       g.mode = 'eaten';
       g.speed = EATEN_SPEED;
+      snapGhostToCell( game, g );
       continue;
     }
     if ( g.mode === 'eaten' ) continue;

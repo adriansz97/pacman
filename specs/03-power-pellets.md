@@ -1,6 +1,6 @@
 # SPEC 03 — Power pellets esquina y modo asustado
 
-> **Status:** Aprobado
+> **Status:** Implementado
 > **Depends on:** SPEC 01, SPEC 02
 > **Date:** 2026-11-23
 > **Objective:** Incorporar cuatro power pellets en las esquinas del laberinto que activen un modo asustado de 360 frames en el que los fantasmas huyen, pueden ser comidos por una cadena de puntos y regresan a la pen antes de reanudar su IA.
